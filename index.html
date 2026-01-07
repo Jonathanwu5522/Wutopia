@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Las Vegas 高爾夫計分（順位制 + Carry + Split + CSV + 修改）</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b1020">
+
+  <!-- iOS: 加入主畫面時更像 App -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="VegasScore">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="VegasScore">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+  <style>
+    :root { font-family: system-ui, -apple-system, "Microsoft JhengHei", "Noto Sans TC", sans-serif; }
+    body { margin: 18px; background:#0b1020; color:#e9eefc; }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    .grid { display:grid; gap:12px; }
+    .panel { background:#111a33; border:1px solid #23305c; border-radius:12px; padding:12px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label { font-size: 13px; opacity:.95; }
+    input, select, button { border-radius:10px; border:1px solid #2a3a70; background:#0e1630; color:#e9eefc; padding:8px 10px; }
+    input[type="number"] { width: 90px; }
+    input[type="text"] { width: 140px; }
+    input[type="checkbox"] { width:auto; }
+    button { cursor:pointer; }
+    button.primary { background:#1d3cff; border-color:#2f58ff; }
+    button.danger { background:#a61d3a; border-color:#d13a5a; }
+    button.secondary { background:#1a2447; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:12px; }
+    th, td { border-bottom:1px solid #23305c; padding:8px; text-align:left; font-size: 13px; vertical-align:top; }
+    th { background:#0f1938; position:sticky; top:0; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #2a3a70; }
+    .bad { background:#3b1220; border-color:#d13a5a; }
+    .muted { opacity:.75; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .hr { height:1px; background:#23305c; margin:10px 0; }
+    .small { font-size:12px; opacity:.85; }
+    .kpi { display:grid; grid-template-columns: 1fr; gap:8px; }
+    .kpi .box { background:#0e1630; border:1px solid #2a3a70; border-radius:12px; padding:10px; }
+    .rightList { max-height: 260px; overflow:auto; border-radius:12px; border:1px solid #23305c; }
+    .rightList table th { position: sticky; top:0; }
+    .btnTiny { padding:6px 8px; border-radius:10px; font-size:12px; }
+
+    /* highlight row when editing */
+    tr.editingRow td { background: rgba(255, 210, 90, 0.18); }
+    tr.editingRow td:first-child { box-shadow: inset 3px 0 0 rgba(255, 210, 90, 0.9); }
+  </style>
+</head>
+
+<body>
+  <h1>🎰 Las Vegas 高爾夫計分（順位制 + CSV + 修改）</h1>
+
+  <div class="grid" style="grid-template-columns: 1.15fr 0.85fr;">
+    <!-- Left: Input -->
+    <div class="panel">
+      <div class="row">
+        <label>球員1</label><input id="p1" type="text" value="A" />
+        <label>球員2</label><input id="p2" type="text" value="B" />
+        <label>球員3</label><input id="p3" type="text" value="C" />
+        <label>球員4</label><input id="p4" type="text" value="D" />
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <label>1 點 =</label>
+        <input id="pointValue" type="number" min="1" value="50" />
+        <label>金額單位</label>
+        <select id="currency">
+          <option value="TWD">TWD</option>
+          <option value="USD">USD</option>
+        </select>
+
+        <label>點數結算方式</label>
+        <select id="settleMode">
+          <option value="team">每隊支付（輸隊總差額，兩人均分）</option>
+          <option value="perPlayer">每人支付（輸隊每人都付差額）</option>
+        </select>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <label class="pill">規則</label>
+        <label><input id="ruleDouble" type="checkbox" checked /> 同桿爆擊 Double（勝方同隊同桿 → 差額×2）</label>
+        <label><input id="ruleCarry" type="checkbox" checked /> Carry（打平不結算，下一洞差額×(累積洞數+1)）</label>
+      </div>
+
+      <!-- NEW: Birdie/Eagle 倍數可選 -->
+      <div class="row">
+        <label><input id="ruleBirdieEagle" type="checkbox" checked /> Birdie/Eagle 倍數</label>
+
+        <label class="small muted">Birdie 倍數</label>
+        <select id="birdieMult">
+          <option value="1">Off</option>
+          <option value="2" selected>×2</option>
+          <option value="3">×3</option>
+        </select>
+
+        <label class="small muted">Eagle 倍數</label>
+        <select id="eagleMult">
+          <option value="3" selected>×3</option>
+          <option value="4">×4</option>
+          <option value="5">×5</option>
+        </select>
+
+        <span class="small muted">（Birdie：-1；Eagle：≤-2）</span>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <label class="pill">本洞輸入</label>
+        <label>洞號</label><input id="holeNo" type="number" min="1" value="1" />
+        <label>Par</label><input id="par" type="number" min="3" value="4" />
+        <span class="small muted">依「目前輸入順位」輸入 1~4 桿數</span>
+        <span id="editBadge" class="pill bad" style="display:none;">修改模式</span>
+      </div>
+
+      <div class="row">
+        <label id="rankLabel1" class="pill mono">1</label><input id="s1" type="number" min="1" />
+        <label id="rankLabel2" class="pill mono">2</label><input id="s2" type="number" min="1" />
+        <label id="rankLabel3" class="pill mono">3</label><input id="s3" type="number" min="1" />
+        <label id="rankLabel4" class="pill mono">4</label><input id="s4" type="number" min="1" />
+      </div>
+
+      <div class="row">
+        <label><input id="split" type="checkbox" /> Split（拆隊：最好對最好、最差對最差）</label>
+        <label class="small muted">Split 點數 = |低-低| + |高-高|（勝負以(低+高)小者勝）</label>
+      </div>
+
+      <div class="row" style="gap:8px;">
+        <button class="primary" id="addOrSave">➕ 記錄本洞</button>
+        <button class="secondary" id="cancelEdit" style="display:none;">取消修改</button>
+        <button id="undo">↩️ 復原上一洞</button>
+        <button class="danger" id="reset">🧨 全部重置</button>
+      </div>
+
+      <div class="row" style="gap:8px;">
+        <button id="exportCsv" class="secondary">⬇️ 輸出 CSV</button>
+        <button id="importBtn" class="secondary">⬆️ 匯入 CSV</button>
+        <input id="importFile" type="file" accept=".csv,text/csv" style="display:none;" />
+      </div>
+
+      <div class="hr"></div>
+      <div id="status" class="small muted"></div>
+    </div>
+
+    <!-- Right: Summary + Hole list -->
+    <div class="panel">
+      <div class="row">
+        <label class="pill">目前順位（1~4）</label>
+      </div>
+      <div id="currentRanking" class="mono"></div>
+
+      <div class="hr"></div>
+
+      <!-- NEW: 顯示淨點數 + 累積桿數 + 累積金額 -->
+      <div class="row">
+        <label class="pill">累積（個人）</label>
+        <span class="small muted">淨點數 + 累積桿數 + 累積金額（依目前 1 點金額）</span>
+      </div>
+
+      <div class="kpi" id="ledgerBoxes"></div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <label class="pill">逐洞（可修改）</label>
+        <span id="carryInfo" class="pill muted"></span>
+      </div>
+
+      <div class="rightList" style="margin-top:10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>洞</th>
+              <th>點數</th>
+              <th>勝負</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="holeList"></tbody>
+        </table>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="small muted">
+        淨點數說明：<br/>
+        - 「每隊支付」：輸隊總點數由兩人均分；贏隊兩人均分收。<br/>
+        - 「每人支付」：輸隊每人都付點數；贏隊每人都收點數。<br/>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom: Full log -->
+  <div class="panel" style="margin-top:12px;">
+    <div class="row">
+      <label class="pill">逐洞紀錄（完整）</label>
+      <span class="small muted">（修改模式時會高亮該洞）</span>
+    </div>
+    <div id="logWrap" style="max-height: 420px; overflow:auto; margin-top:10px;">
+      <table>
+        <thead>
+          <tr>
+            <th>洞</th>
+            <th>順位(1~4)</th>
+            <th>隊伍（1&4 / 2&3）</th>
+            <th>本洞桿數（依球員）</th>
+            <th>Vegas</th>
+            <th>勝負</th>
+            <th>點數</th>
+            <th>金額</th>
+            <th>備註</th>
+          </tr>
+        </thead>
+        <tbody id="log"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // -------- State --------
+  let players = [
+    { name: "A" },
+    { name: "B" },
+    { name: "C" },
+    { name: "D" },
+  ];
+
+  let ranking = [0,1,2,3];
+  let holeHistory = [];
+  let carryCount = 0;
+
+  let netPoints = [0,0,0,0];
+  let totalStrokes = [0,0,0,0];
+
+  // edit mode
+  let editIndex = null;
+  let inputRanking = [0,1,2,3];
+
+  // -------- DOM --------
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("status");
+  const logEl = $("log");
+  const holeListEl = $("holeList");
+  const currentRankingEl = $("currentRanking");
+  const ledgerBoxesEl = $("ledgerBoxes");
+  const carryInfoEl = $("carryInfo");
+
+  function readNames() {
+    players[0].name = $("p1").value.trim() || "A";
+    players[1].name = $("p2").value.trim() || "B";
+    players[2].name = $("p3").value.trim() || "C";
+    players[3].name = $("p4").value.trim() || "D";
+  }
+
+  function fmtMoney(n) {
+    const cur = $("currency").value;
+    // keep integer display for cash
+    const v = Math.round(n);
+    return `${cur} ${v.toLocaleString("en-US")}`;
+  }
+
+  function pointValue() {
+    return Number($("pointValue").value || 50);
+  }
+
+  function setStatus(msg, isBad=false) {
+    statusEl.textContent = msg;
+    statusEl.style.color = isBad ? "#ff8aa0" : "#b8c7ff";
+  }
+
+  function updateRankingLabels() {
+    readNames();
+    const labels = [$("rankLabel1"), $("rankLabel2"), $("rankLabel3"), $("rankLabel4")];
+    for (let i=0;i<4;i++){
+      const p = players[inputRanking[i]];
+      labels[i].textContent = `${i+1}: ${p.name}`;
+    }
+    const rText = ranking.map((pi, idx) => `${idx+1}. ${players[pi].name}`).join("  |  ");
+    currentRankingEl.textContent = rText;
+  }
+
+  function updateCarryUI() {
+    if ($("ruleCarry").checked && carryCount > 0) {
+      carryInfoEl.textContent = `Carry 中：已累積 ${carryCount} 洞（下一洞差額 × ${carryCount+1}）`;
+      carryInfoEl.className = "pill bad";
+    } else {
+      carryInfoEl.textContent = "Carry：無";
+      carryInfoEl.className = "pill muted";
+    }
+  }
+
+  // NEW: ledger shows net points, total strokes, total money
+  function updateLedgerUI() {
+    readNames();
+    const pv = pointValue();
+    ledgerBoxesEl.innerHTML = "";
+    for (let i=0;i<4;i++){
+      const pts = netPoints[i];
+      const sign = pts > 0 ? "+" : "";
+      const money = pts * pv;
+      const moneySign = money > 0 ? "+" : "";
+      const box = document.createElement("div");
+      box.className = "box";
+      box.innerHTML = `
+        <div class="row" style="justify-content:space-between;">
+          <div><span class="pill mono">${players[i].name}</span></div>
+          <div class="mono">${sign}${pts.toFixed(1)} 點</div>
+        </div>
+        <div class="row" style="justify-content:space-between; margin-top:6px;">
+          <div class="small muted">累積桿數</div>
+          <div class="mono">${totalStrokes[i]}</div>
+        </div>
+        <div class="row" style="justify-content:space-between; margin-top:6px;">
+          <div class="small muted">累積金額</div>
+          <div class="mono">${moneySign}${fmtMoney(Math.abs(money))}</div>
+        </div>
+      `;
+      ledgerBoxesEl.appendChild(box);
+    }
+  }
+
+  function clearStrokeInputs() {
+    $("s1").value = "";
+    $("s2").value = "";
+    $("s3").value = "";
+    $("s4").value = "";
+  }
+
+  function parseHoleInputs() {
+    const holeNo = Number($("holeNo").value || 1);
+    const par = Number($("par").value || 4);
+    const split = $("split").checked;
+
+    const s = [
+      Number($("s1").value),
+      Number($("s2").value),
+      Number($("s3").value),
+      Number($("s4").value),
+    ];
+
+    if (s.some(x => !Number.isFinite(x) || x <= 0)) {
+      return { error: "請把本洞 1~4 的桿數都填上（> 0）。" };
+    }
+    return { holeNo, par, split, s };
+  }
+
+  // -------- Rules / Core --------
+  function vegasNumber(a, b) {
+    const low = Math.min(a,b);
+    const high = Math.max(a,b);
+    return low*10 + high;
+  }
+
+  // NEW: birdie/eagle multipliers selectable
+  function birdieEagleMultiplier(strokesA, strokesB, par) {
+    if (!$("ruleBirdieEagle").checked) return 1;
+
+    const relA = strokesA - par;
+    const relB = strokesB - par;
+
+    const birdie = Number($("birdieMult").value || 2);
+    const eagle  = Number($("eagleMult").value || 3);
+
+    if (relA <= -2 || relB <= -2) return eagle;      // Eagle
+    if (relA === -1 || relB === -1) return birdie;   // Birdie
+    return 1;
+  }
+
+  function applySettlement(points, teamWin, teamLose) {
+    const mode = $("settleMode").value;
+    if (mode === "team") {
+      const each = points / 2;
+      teamLose.forEach(pi => netPoints[pi] -= each);
+      teamWin.forEach(pi => netPoints[pi] += each);
+    } else {
+      teamLose.forEach(pi => netPoints[pi] -= points);
+      teamWin.forEach(pi => netPoints[pi] += points);
+    }
+  }
+
+  function sortRankingByStrokes(strokesByPlayer, prevRanking, histStrokesList) {
+    const rankPos = new Map(prevRanking.map((pi, idx) => [pi, idx]));
+    const cmp = (a, b) => {
+      const sa = strokesByPlayer[a], sb = strokesByPlayer[b];
+      if (sa !== sb) return sa - sb;
+      for (let k = histStrokesList.length - 1; k >= 0; k--) {
+        const ha = histStrokesList[k][a], hb = histStrokesList[k][b];
+        if (ha !== hb) return ha - hb;
+      }
+      return (rankPos.get(a) ?? 0) - (rankPos.get(b) ?? 0);
+    };
+    return [...prevRanking].sort(cmp);
+  }
+
+  function computeOneHole({ holeNo, par, split, strokesByPlayer, rankingAtStart }) {
+    const team1 = [ rankingAtStart[0], rankingAtStart[3] ]; // 1&4
+    const team2 = [ rankingAtStart[1], rankingAtStart[2] ]; // 2&3
+    const t1St = team1.map(pi => strokesByPlayer[pi]);
+    const t2St = team2.map(pi => strokesByPlayer[pi]);
+
+    let diffBase = 0;
+    let vegasText = "";
+    let noteParts = [];
+
+    let teamWin = null, teamLose = null, outcomeText = "";
+
+    if (!split) {
+      const n1 = vegasNumber(t1St[0], t1St[1]);
+      const n2 = vegasNumber(t2St[0], t2St[1]);
+      vegasText = `${n1} vs ${n2}`;
+      diffBase = Math.abs(n1 - n2);
+      if (n1 === n2) outcomeText = "打平";
+      else if (n1 < n2) { teamWin = team1; teamLose = team2; outcomeText = `${players[team1[0]].name}&${players[team1[1]].name} 勝`; }
+      else { teamWin = team2; teamLose = team1; outcomeText = `${players[team2[0]].name}&${players[team2[1]].name} 勝`; }
+    } else {
+      const t1Low = Math.min(...t1St), t1High = Math.max(...t1St);
+      const t2Low = Math.min(...t2St), t2High = Math.max(...t2St);
+      const lowDiff = Math.abs(t1Low - t2Low);
+      const highDiff = Math.abs(t1High - t2High);
+      diffBase = lowDiff + highDiff;
+      vegasText = `Split: (L ${t1Low} vs ${t2Low}) + (H ${t1High} vs ${t2High})`;
+      noteParts.push("Split");
+
+      const sum1 = t1Low + t1High;
+      const sum2 = t2Low + t2High;
+      if (sum1 === sum2) outcomeText = "打平";
+      else if (sum1 < sum2) { teamWin = team1; teamLose = team2; outcomeText = `${players[team1[0]].name}&${players[team1[1]].name} 勝`; }
+      else { teamWin = team2; teamLose = team1; outcomeText = `${players[team2[0]].name}&${players[team2[1]].name} 勝`; }
+    }
+
+    let multiplier = 1;
+
+    if ($("ruleDouble").checked && teamWin) {
+      const winSt = teamWin.map(pi => strokesByPlayer[pi]);
+      if (winSt[0] === winSt[1]) { multiplier *= 2; noteParts.push("Double"); }
+    }
+
+    // Birdie/Eagle
+    if (teamWin && $("ruleBirdieEagle").checked) {
+      const winSt = teamWin.map(pi => strokesByPlayer[pi]);
+      const beMul = birdieEagleMultiplier(winSt[0], winSt[1], par);
+      if (beMul > 1) {
+        multiplier *= beMul;
+        // show label based on result
+        const relA = winSt[0] - par, relB = winSt[1] - par;
+        if (relA <= -2 || relB <= -2) noteParts.push(`Eagle×${Number($("eagleMult").value || 3)}`);
+        else noteParts.push(`Birdie×${Number($("birdieMult").value || 2)}`);
+      }
+    }
+
+    return { team1, team2, teamWin, teamLose, outcomeText, vegasText, diffBase, multiplier, noteParts };
+  }
+
+  // -------- Rebuild from raw --------
+  function rebuildAllFromHistory(newHistory) {
+    holeHistory = [];
+    ranking = [0,1,2,3];
+    carryCount = 0;
+    netPoints = [0,0,0,0];
+    totalStrokes = [0,0,0,0];
+
+    const histStrokesList = [];
+
+    for (const raw of newHistory) {
+      const rankingAtStart = raw.rankingAtStart ?? [...ranking];
+      const strokesByPlayer = raw.strokesByPlayer;
+
+      for (let i=0;i<4;i++) totalStrokes[i] += strokesByPlayer[i];
+
+      const core = computeOneHole({
+        holeNo: raw.holeNo,
+        par: raw.par,
+        split: raw.split,
+        strokesByPlayer,
+        rankingAtStart
+      });
+
+      let carryMul = 1;
+      let points = 0;
+
+      if ($("ruleCarry").checked) {
+        if (!core.teamWin) {
+          carryCount += 1;
+          carryMul = 0;
+          core.noteParts.push(`Carry 累積(${carryCount})`);
+        } else {
+          carryMul = (carryCount + 1);
+          if (carryCount > 0) core.noteParts.push(`Carry×${carryMul}`);
+        }
+      }
+
+      points = (carryMul === 0) ? 0 : (core.diffBase * core.multiplier * carryMul);
+
+      if (core.teamWin && points > 0) applySettlement(points, core.teamWin, core.teamLose);
+      if (core.teamWin && $("ruleCarry").checked) carryCount = 0;
+
+      ranking = sortRankingByStrokes(strokesByPlayer, ranking, histStrokesList);
+      histStrokesList.push(strokesByPlayer);
+
+      const pv = pointValue();
+      const money = points * pv;
+
+      const result = {
+        team1: core.team1,
+        team2: core.team2,
+        vegasText: core.vegasText,
+        outcomeText: core.outcomeText,
+        pointsText: points === 0 ? "-" : points.toFixed(1),
+        moneyText: points === 0 ? "-" : fmtMoney(money),
+        note: core.noteParts.join(" / "),
+        pointsValue: points
+      };
+
+      holeHistory.push({
+        holeNo: raw.holeNo,
+        par: raw.par,
+        split: raw.split,
+        strokesByPlayer,
+        rankingAtStart,
+        result
+      });
+    }
+
+    // exit edit mode
+    editIndex = null;
+    $("editBadge").style.display = "none";
+    $("cancelEdit").style.display = "none";
+    $("addOrSave").textContent = "➕ 記錄本洞";
+    inputRanking = [...ranking];
+
+    updateRankingLabels();
+    updateLedgerUI();
+    updateCarryUI();
+    renderLog();
+    renderHoleList();
+
+    const last = holeHistory[holeHistory.length - 1];
+    $("holeNo").value = last ? (last.holeNo + 1) : 1;
+  }
+
+  // -------- Rendering --------
+  function renderLog() {
+    readNames();
+    logEl.innerHTML = "";
+    for (let idx=0; idx<holeHistory.length; idx++) {
+      const h = holeHistory[idx];
+      const rStart = h.rankingAtStart.map(pi => players[pi].name).join(", ");
+      const t1 = h.result.team1.map(pi => players[pi].name).join("&");
+      const t2 = h.result.team2.map(pi => players[pi].name).join("&");
+      const strokesText = players.map((p, i) => `${p.name}:${h.strokesByPlayer[i]}`).join("  ");
+
+      const tr = document.createElement("tr");
+      tr.id = `logRow-${idx}`;
+      if (editIndex === idx) tr.classList.add("editingRow");
+
+      tr.innerHTML = `
+        <td class="mono">${h.holeNo}</td>
+        <td>${rStart}</td>
+        <td>${t1} vs ${t2}</td>
+        <td class="mono">${strokesText}</td>
+        <td class="mono">${h.result.vegasText}</td>
+        <td>${h.result.outcomeText}</td>
+        <td class="mono">${h.result.pointsText}</td>
+        <td class="mono">${h.result.moneyText}</td>
+        <td class="muted">${h.result.note || ""}</td>
+      `;
+      logEl.appendChild(tr);
+    }
+  }
+
+  function renderHoleList() {
+    holeListEl.innerHTML = "";
+    for (let idx=0; idx<holeHistory.length; idx++) {
+      const h = holeHistory[idx];
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="mono">${h.holeNo}</td>
+        <td class="mono">${h.result.pointsText}</td>
+        <td>${h.result.outcomeText}</td>
+        <td><button class="btnTiny secondary" data-edit="${idx}">修改</button></td>
+      `;
+      holeListEl.appendChild(tr);
+    }
+    holeListEl.querySelectorAll("button[data-edit]").forEach(btn => {
+      btn.addEventListener("click", () => enterEditMode(Number(btn.getAttribute("data-edit"))));
+    });
+  }
+
+  // -------- Normal add --------
+  function addHoleNormal() {
+    readNames();
+    const parsed = parseHoleInputs();
+    if (parsed.error) { setStatus(parsed.error, true); return; }
+    const { holeNo, par, split, s } = parsed;
+
+    const strokesByPlayer = [0,0,0,0];
+    for (let pos=0; pos<4; pos++){
+      const pi = inputRanking[pos];
+      strokesByPlayer[pi] = s[pos];
+    }
+
+    const rankingAtStart = [...ranking];
+
+    const newRaw = holeHistory.map(h => ({
+      holeNo: h.holeNo, par: h.par, split: h.split,
+      strokesByPlayer: h.strokesByPlayer, rankingAtStart: h.rankingAtStart
+    }));
+    newRaw.push({ holeNo, par, split, strokesByPlayer, rankingAtStart });
+
+    rebuildAllFromHistory(newRaw);
+
+    clearStrokeInputs();
+    setStatus(`已記錄第 ${holeNo} 洞。下一洞順位已依本洞桿數重排（同桿會往前洞追溯比）。`);
+  }
+
+  // -------- Edit mode --------
+  function enterEditMode(index) {
+    if (index < 0 || index >= holeHistory.length) return;
+    editIndex = index;
+
+    const h = holeHistory[index];
+    $("editBadge").style.display = "inline-block";
+    $("cancelEdit").style.display = "inline-block";
+    $("addOrSave").textContent = "💾 儲存修改";
+    setStatus(`正在修改第 ${h.holeNo} 洞：底下大表已高亮該洞。`);
+
+    inputRanking = [...h.rankingAtStart];
+    updateRankingLabels();
+
+    $("holeNo").value = h.holeNo;
+    $("par").value = h.par;
+    $("split").checked = !!h.split;
+
+    $("s1").value = h.strokesByPlayer[inputRanking[0]];
+    $("s2").value = h.strokesByPlayer[inputRanking[1]];
+    $("s3").value = h.strokesByPlayer[inputRanking[2]];
+    $("s4").value = h.strokesByPlayer[inputRanking[3]];
+
+    renderLog();
+    const row = document.getElementById(`logRow-${index}`);
+    if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function cancelEditMode() {
+    editIndex = null;
+    $("editBadge").style.display = "none";
+    $("cancelEdit").style.display = "none";
+    $("addOrSave").textContent = "➕ 記錄本洞";
+    inputRanking = [...ranking];
+    updateRankingLabels();
+    clearStrokeInputs();
+
+    const last = holeHistory[holeHistory.length - 1];
+    $("holeNo").value = last ? (last.holeNo + 1) : 1;
+
+    renderLog();
+    setStatus("已取消修改。");
+  }
+
+  function saveEdit() {
+    if (editIndex === null) return;
+
+    const parsed = parseHoleInputs();
+    if (parsed.error) { setStatus(parsed.error, true); return; }
+    const { holeNo, par, split, s } = parsed;
+
+    const old = holeHistory[editIndex];
+    const strokesByPlayer = [...old.strokesByPlayer];
+    for (let pos=0; pos<4; pos++){
+      const pi = inputRanking[pos];
+      strokesByPlayer[pi] = s[pos];
+    }
+
+    const newRaw = holeHistory.map((h, idx) => ({
+      holeNo: (idx === editIndex) ? holeNo : h.holeNo,
+      par:    (idx === editIndex) ? par    : h.par,
+      split:  (idx === editIndex) ? split  : h.split,
+      strokesByPlayer: (idx === editIndex) ? strokesByPlayer : h.strokesByPlayer,
+      rankingAtStart: h.rankingAtStart
+    }));
+
+    rebuildAllFromHistory(newRaw);
+    clearStrokeInputs();
+    setStatus(`已儲存修改（第 ${holeNo} 洞）。所有後續洞已重新計算。`);
+  }
+
+  // -------- Undo / Reset --------
+  function undoHole() {
+    if (holeHistory.length === 0) { setStatus("目前沒有可復原的洞數。", true); return; }
+    const raw = holeHistory.slice(0, -1).map(h => ({
+      holeNo: h.holeNo, par: h.par, split: h.split,
+      strokesByPlayer: h.strokesByPlayer, rankingAtStart: h.rankingAtStart
+    }));
+    rebuildAllFromHistory(raw);
+    setStatus("已復原上一洞。");
+  }
+
+  function resetAll() {
+    rebuildAllFromHistory([]);
+    clearStrokeInputs();
+    setStatus("已全部重置。");
+  }
+
+  // -------- CSV (team names columns included) --------
+  function csvEscape(v) {
+    const s = String(v ?? "");
+    if (/[,"\n\r]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
+    return s;
+  }
+
+  function buildCsv() {
+    readNames();
+
+    const lines = [];
+    lines.push(["TYPE","VALUE1","VALUE2","VALUE3","VALUE4"].map(csvEscape).join(","));
+    lines.push(["PLAYERS", players[0].name, players[1].name, players[2].name, players[3].name].map(csvEscape).join(","));
+
+    lines.push(["SETTINGS",
+      `pointValue=${$("pointValue").value}`,
+      `currency=${$("currency").value}`,
+      `settleMode=${$("settleMode").value}`,
+      `rules=${[
+        $("ruleDouble").checked ? "Double" : "",
+        $("ruleCarry").checked ? "Carry" : "",
+        $("ruleBirdieEagle").checked ? "BirdieEagle" : ""
+      ].filter(Boolean).join("|")}`,
+      `birdieMult=${$("birdieMult").value}`,
+      `eagleMult=${$("eagleMult").value}`
+    ].map(csvEscape).join(","));
+
+    lines.push("");
+    lines.push("HOLES");
+    lines.push([
+      "holeNo","par","split",
+      "rankingAtStartIdx",
+      "team1_names","team2_names",
+      "s_p1","s_p2","s_p3","s_p4",
+      "points","money","outcome","vegas","note"
+    ].map(csvEscape).join(","));
+
+    const pv = pointValue();
+
+    for (const h of holeHistory) {
+      const points = (h.result.pointsValue ?? 0);
+      const money = points * pv;
+      const team1Names = h.result.team1.map(pi => players[pi].name).join("&");
+      const team2Names = h.result.team2.map(pi => players[pi].name).join("&");
+
+      lines.push([
+        h.holeNo,
+        h.par,
+        h.split ? 1 : 0,
+        h.rankingAtStart.join("-"),
+        team1Names,
+        team2Names,
+        h.strokesByPlayer[0],
+        h.strokesByPlayer[1],
+        h.strokesByPlayer[2],
+        h.strokesByPlayer[3],
+        points,
+        money,
+        h.result.outcomeText,
+        h.result.vegasText,
+        h.result.note || ""
+      ].map(csvEscape).join(","));
+    }
+
+    lines.push("");
+    lines.push("SUMMARY");
+    lines.push(["player","netPoints","totalStrokes","moneyIfSettleNow(+receive/-pay)"].map(csvEscape).join(","));
+    for (let i=0;i<4;i++){
+      lines.push([
+        players[i].name,
+        netPoints[i],
+        totalStrokes[i],
+        netPoints[i]*pv
+      ].map(csvEscape).join(","));
+    }
+
+    return lines.join("\n");
+  }
+
+  function downloadCsv() {
+    const csv = buildCsv();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const dt = new Date();
+    const pad = (n) => String(n).padStart(2,"0");
+    const filename = `lasvegas_score_${dt.getFullYear()}${pad(dt.getMonth()+1)}${pad(dt.getDate())}_${pad(dt.getHours())}${pad(dt.getMinutes())}.csv`;
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus("已輸出 CSV。");
+  }
+
+  // CSV import: ignores extra cols; only needs core fields
+  function parseCsvLines(text) {
+    const rows = [];
+    let i = 0, field = "", row = [], inQuotes = false;
+    const pushField = () => { row.push(field); field = ""; };
+    const pushRow = () => { rows.push(row); row = []; };
+
+    while (i < text.length) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i+1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        } else { field += c; i++; continue; }
+      } else {
+        if (c === '"') { inQuotes = true; i++; continue; }
+        if (c === ",") { pushField(); i++; continue; }
+        if (c === "\n") { pushField(); pushRow(); i++; continue; }
+        if (c === "\r") { i++; continue; }
+        field += c; i++; continue;
+      }
+    }
+    pushField(); pushRow();
+    return rows;
+  }
+
+  function importCsvText(text) {
+    const rows = parseCsvLines(text).filter(r => r.length && r.some(x => String(x).trim() !== ""));
+
+    const playersRow = rows.find(r => (r[0] || "").trim() === "PLAYERS");
+    if (playersRow && playersRow.length >= 5) {
+      $("p1").value = playersRow[1] || "A";
+      $("p2").value = playersRow[2] || "B";
+      $("p3").value = playersRow[3] || "C";
+      $("p4").value = playersRow[4] || "D";
+    }
+    readNames();
+
+    const holesIdx = rows.findIndex(r => (r[0] || "").trim() === "HOLES");
+    if (holesIdx < 0) { setStatus("CSV 格式不對：找不到 HOLES 區段。", true); return; }
+
+    const header = rows[holesIdx+1];
+    if (!header || header[0] !== "holeNo") { setStatus("CSV 格式不對：HOLES 表頭不正確。", true); return; }
+
+    const idxRanking = header.indexOf("rankingAtStartIdx");
+    const idxPar = header.indexOf("par");
+    const idxSplit = header.indexOf("split");
+    const idxSP1 = header.indexOf("s_p1");
+    const idxSP2 = header.indexOf("s_p2");
+    const idxSP3 = header.indexOf("s_p3");
+    const idxSP4 = header.indexOf("s_p4");
+    if ([idxRanking, idxPar, idxSplit, idxSP1, idxSP2, idxSP3, idxSP4].some(x => x < 0)) {
+      setStatus("CSV HOLES 欄位不足，無法匯入。", true);
+      return;
+    }
+
+    const newRaw = [];
+    for (let k = holesIdx + 2; k < rows.length; k++) {
+      const r = rows[k];
+      const tag = (r[0] || "").trim();
+      if (tag === "SUMMARY") break;
+
+      const holeNo = Number(r[0]);
+      const par = Number(r[idxPar]);
+      const split = String(r[idxSplit]) === "1";
+      const rankingAtStartIdx = String(r[idxRanking] || "0-1-2-3").split("-").map(x => Number(x));
+      const s_p1 = Number(r[idxSP1]);
+      const s_p2 = Number(r[idxSP2]);
+      const s_p3 = Number(r[idxSP3]);
+      const s_p4 = Number(r[idxSP4]);
+
+      if (![holeNo, par, s_p1, s_p2, s_p3, s_p4].every(n => Number.isFinite(n) && n > 0)) continue;
+
+      newRaw.push({
+        holeNo,
+        par,
+        split,
+        rankingAtStart: (rankingAtStartIdx.length === 4 && rankingAtStartIdx.every(x => [0,1,2,3].includes(x)))
+          ? rankingAtStartIdx
+          : [0,1,2,3],
+        strokesByPlayer: [s_p1, s_p2, s_p3, s_p4]
+      });
+    }
+
+    rebuildAllFromHistory(newRaw);
+    clearStrokeInputs();
+    setStatus(`已匯入 CSV：共 ${newRaw.length} 洞。`);
+  }
+
+  // -------- Events --------
+  ["p1","p2","p3","p4"].forEach(id => $(id).addEventListener("input", () => {
+    readNames();
+    updateRankingLabels();
+    updateLedgerUI();
+    renderLog();
+    renderHoleList();
+  }));
+
+  // settings that require recalculation
+  [
+    "ruleCarry","ruleDouble","ruleBirdieEagle",
+    "birdieMult","eagleMult",
+    "settleMode","pointValue","currency"
+  ].forEach(id => {
+    $(id).addEventListener("change", () => {
+      const raw = holeHistory.map(h => ({
+        holeNo: h.holeNo, par: h.par, split: h.split,
+        strokesByPlayer: h.strokesByPlayer, rankingAtStart: h.rankingAtStart
+      }));
+      rebuildAllFromHistory(raw);
+      setStatus("設定已更新，已重新計算所有洞的點數/順位。");
+    });
+  });
+
+  $("addOrSave").addEventListener("click", () => {
+    if (editIndex === null) addHoleNormal();
+    else saveEdit();
+  });
+
+  $("cancelEdit").addEventListener("click", cancelEditMode);
+  $("undo").addEventListener("click", undoHole);
+  $("reset").addEventListener("click", resetAll);
+
+  $("exportCsv").addEventListener("click", downloadCsv);
+
+  $("importBtn").addEventListener("click", () => $("importFile").click());
+  $("importFile").addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const text = await f.text();
+    importCsvText(text);
+    e.target.value = "";
+  });
+
+  // -------- Init --------
+  rebuildAllFromHistory([]);
+  inputRanking = [...ranking];
+  updateRankingLabels();
+  updateLedgerUI();
+  updateCarryUI();
+  renderLog();
+  renderHoleList();
+  setStatus("填入第 1 洞桿數後按「記錄本洞」。右側可按「修改」，底下大表會高亮該洞。");
+})();
+</script>
+
+<!-- Service Worker register -->
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./service-worker.js");
+    });
+  }
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./service-worker.js");
+    });
+  }
+</script>
+
+</body>
+</html>
