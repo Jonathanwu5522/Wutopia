@@ -561,7 +561,10 @@
     logEl.innerHTML = "";
     for (let idx=0; idx<holeHistory.length; idx++) {
       const h = holeHistory[idx];
-      const rStart = h.rankingAtStart.map(pi => players[pi].name).join(", ");
+      const rStart = h.rankingAtStart
+               .map((pi, idx) => `${idx+1}. ${players[pi].name}`)
+               .join("  ");
+
       const t1 = h.result.team1.map(pi => players[pi].name).join("&");
       const t2 = h.result.team2.map(pi => players[pi].name).join("&");
       const strokesText = players.map((p, i) => `${p.name}:${h.strokesByPlayer[i]}`).join("  ");
